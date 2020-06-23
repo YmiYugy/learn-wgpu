@@ -26,6 +26,7 @@ pub struct State {
     pub num_indices: u32,
 
     pub instances: Vec<Instance>,
+    pub instance_buffer: wgpu::Buffer,
 
     pub texture: Texture,
     pub texture_bind_group: wgpu::BindGroup,
@@ -53,7 +54,7 @@ impl State {
         let (vertex_buffer, num_vertices, index_buffer, num_indices) =
             Self::setup_vertex_input(&device);
 
-        let instances = Self::setup_instances();
+        let (instances, instance_buffer) = Self::setup_instances(&device);
 
         let (texture, texture_bind_group_layout, texture_bind_group) =
             Self::setup_texture(&device, &queue);
@@ -61,7 +62,7 @@ impl State {
         let (camera, camera_controller) = Self::setup_camera(&sc_desc);
 
         let (uniforms, uniform_buffer, uniform_bind_group_layout, uniform_bind_group) =
-            Self::setup_uniforms(&device, &camera);
+            Self::setup_uniforms(&device, &camera, &instance_buffer);
         let (vs, fs) = Self::setup_shader(&device);
 
         let default_render_pipeline = Self::setup_default_render_pipeline(
@@ -93,6 +94,7 @@ impl State {
             index_buffer,
             num_indices,
             instances,
+            instance_buffer,
             texture,
             texture_bind_group,
             camera,
@@ -156,7 +158,7 @@ impl State {
                 label: Some("Render Encoder"),
             });
         {
-            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
                     attachment: &frame.view,
                     resolve_target: None,
@@ -167,42 +169,12 @@ impl State {
                 }],
                 depth_stencil_attachment: None,
             });
-        }
-
-        {
-            for instance in &self.instances {
-                self.uniforms.model = instance.to_matrix();
-                let staging_buffer = self.device.create_buffer_with_data(
-                    bytemuck::cast_slice(&[self.uniforms]),
-                    wgpu::BufferUsage::COPY_SRC,
-                );
-                encoder.copy_buffer_to_buffer(
-                    &staging_buffer,
-                    0,
-                    &self.uniform_buffer,
-                    0,
-                    std::mem::size_of::<Uniforms>() as wgpu::BufferAddress,
-                );
-
-                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                        attachment: &frame.view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: true,
-                        },
-                    }],
-                    depth_stencil_attachment: None,
-                });
-
-                render_pass.set_pipeline(&self.default_render_pipeline);
-                render_pass.set_bind_group(0, &self.texture_bind_group, &[]);
-                render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
-                render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(self.index_buffer.slice(..));
-                render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
-            }
+            render_pass.set_pipeline(&self.default_render_pipeline);
+            render_pass.set_bind_group(0, &self.texture_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(self.index_buffer.slice(..));
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..Instance::NUM_INSTANCES);
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -278,6 +250,7 @@ impl State {
     fn setup_uniforms(
         device: &wgpu::Device,
         camera: &Camera,
+        instance_buffer: &wgpu::Buffer,
     ) -> (
         Uniforms,
         wgpu::Buffer,
@@ -295,22 +268,39 @@ impl State {
         let uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("uniform_bind_group_layout"),
-                bindings: &[wgpu::BindGroupLayoutEntry::new(
-                    0,
-                    wgpu::ShaderStage::VERTEX,
-                    wgpu::BindingType::UniformBuffer {
-                        dynamic: false,
-                        min_binding_size: None,
-                    },
-                )],
+                bindings: &[
+                    wgpu::BindGroupLayoutEntry::new(
+                        0,
+                        wgpu::ShaderStage::VERTEX,
+                        wgpu::BindingType::UniformBuffer {
+                            dynamic: false,
+                            min_binding_size: None,
+                        },
+                    ),
+                    wgpu::BindGroupLayoutEntry::new(
+                        1,
+                        wgpu::ShaderStage::VERTEX,
+                        wgpu::BindingType::StorageBuffer {
+                            dynamic: false,
+                            min_binding_size: None,
+                            readonly: true,
+                        },
+                    ),
+                ],
             });
 
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &uniform_bind_group_layout,
-            bindings: &[wgpu::Binding {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(uniform_buffer.slice(..)),
-            }],
+            bindings: &[
+                wgpu::Binding {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(uniform_buffer.slice(..)),
+                },
+                wgpu::Binding {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(instance_buffer.slice(..)),
+                },
+            ],
             label: Some("uniform_bind_group"),
         });
 
@@ -419,8 +409,8 @@ impl State {
         device.create_render_pipeline(&descriptor)
     }
 
-    fn setup_instances() -> Vec<Instance> {
-        (0..Instance::NUM_INSTANCES_PER_ROW)
+    fn setup_instances(device: &wgpu::Device) -> (Vec<Instance>, wgpu::Buffer) {
+        let instances: Vec<Instance> = (0..Instance::NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
                 (0..Instance::NUM_INSTANCES_PER_ROW).map(move |x| {
                     let position = cgmath::Vector3 {
@@ -444,7 +434,14 @@ impl State {
                     Instance { position, rotation }
                 })
             })
-            .collect()
+            .collect();
+
+        let instance_data: Vec<InstanceRaw> = instances.iter().map(Instance::to_raw).collect();
+        let instance_buffer = device.create_buffer_with_data(
+            bytemuck::cast_slice(&instance_data),
+            wgpu::BufferUsage::STORAGE,
+        );
+        (instances, instance_buffer)
     }
 
     #[allow(dead_code)]

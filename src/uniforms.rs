@@ -5,7 +5,6 @@ use cgmath::SquareMatrix;
 #[derive(Debug, Copy, Clone)]
 pub struct Uniforms {
     pub view_proj: cgmath::Matrix4<f32>,
-    pub model: cgmath::Matrix4<f32>,
 }
 
 unsafe impl bytemuck::Pod for Uniforms {}
@@ -15,7 +14,6 @@ impl Uniforms {
     pub fn new() -> Uniforms {
         Self {
             view_proj: cgmath::Matrix4::identity(),
-            model: cgmath::Matrix4::identity(),
         }
     }
 
