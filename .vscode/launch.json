@@ -5,6 +5,15 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "type": "cppvsdbg",
+            "request": "launch",
+            "name": "run learn-wgpu",
+            "program": "${workspaceRoot}\\target\\debug\\learn-wgpu.exe",
+            "args": [],
+            "cwd": "${workspaceRoot}",
+            "sourceFileMap": {}
+        },
+        {
             "type": "lldb",
             "request": "launch",
             "name": "Debug executable 'learn-wgpu'",

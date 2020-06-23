@@ -20,6 +20,9 @@ pub struct State {
     pub swap_chain: wgpu::SwapChain,
     pub sc_desc: wgpu::SwapChainDescriptor,
 
+    pub depth_texture: Texture,
+    pub depth_texture_bind_group: wgpu::BindGroup,
+
     pub vertex_buffer: wgpu::Buffer,
     pub num_vertices: u32,
     pub index_buffer: wgpu::Buffer,
@@ -51,6 +54,8 @@ impl State {
 
         let (swap_chain, sc_desc) = Self::setup_swapchain(&device, &size, &surface);
 
+        let (depth_texture, depth_texture_bind_group_layout, depth_texture_bind_group) = Self::setup_depth_texture(&device, &sc_desc);
+
         let (vertex_buffer, num_vertices, index_buffer, num_indices) =
             Self::setup_vertex_input(&device);
 
@@ -67,7 +72,7 @@ impl State {
 
         let default_render_pipeline = Self::setup_default_render_pipeline(
             &device,
-            &[&texture_bind_group_layout, &uniform_bind_group_layout],
+            &[&depth_texture_bind_group_layout, &uniform_bind_group_layout],
             sc_desc.format,
             &vs,
             &fs,
@@ -89,6 +94,8 @@ impl State {
             queue,
             swap_chain,
             sc_desc,
+            depth_texture,
+            depth_texture_bind_group,
             vertex_buffer,
             num_vertices,
             index_buffer,
@@ -113,6 +120,8 @@ impl State {
         self.sc_desc.width = new_size.width;
         self.sc_desc.height = new_size.height;
         self.swap_chain = self.device.create_swap_chain(&self.surface, &self.sc_desc);
+        self.depth_texture =
+            Texture::create_depth_texture(&self.device, &self.sc_desc, "depth_texture");
     }
 
     pub fn input(&mut self, event: &Event<()>) -> bool {
@@ -167,10 +176,17 @@ impl State {
                         store: true,
                     },
                 }],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
+                    attachment: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: true,
+                    }),
+                    stencil_ops: None,
+                }),
             });
             render_pass.set_pipeline(&self.default_render_pipeline);
-            render_pass.set_bind_group(0, &self.texture_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.depth_texture_bind_group, &[]);
             render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
@@ -312,6 +328,51 @@ impl State {
         let num_indices = INDICES.len() as u32;
 
         (vertex_buffer, num_vertices, index_buffer, num_indices)
+    }
+
+    fn setup_depth_texture(
+        device: &wgpu::Device,
+        sc_desc: &wgpu::SwapChainDescriptor,
+    ) -> (Texture, wgpu::BindGroupLayout, wgpu::BindGroup) {
+        let texture = Texture::create_depth_texture(&device, &sc_desc, "depth_texture");
+
+        let depth_texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("texture_bind_group_layout"),
+                bindings: &[
+                    wgpu::BindGroupLayoutEntry::new(
+                        0,
+                        wgpu::ShaderStage::FRAGMENT,
+                        wgpu::BindingType::SampledTexture {
+                            dimension: wgpu::TextureViewDimension::D2,
+                            component_type: wgpu::TextureComponentType::Uint,
+                            multisampled: false,
+                        },
+                    ),
+                    wgpu::BindGroupLayoutEntry::new(
+                        1,
+                        wgpu::ShaderStage::FRAGMENT,
+                        wgpu::BindingType::Sampler { comparison: false },
+                    ),
+                ],
+            });
+
+        let depth_texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &depth_texture_bind_group_layout,
+            bindings: &[
+                wgpu::Binding {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture.view),
+                },
+                wgpu::Binding {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
+                },
+            ],
+            label: Some("depth_texture_bind_group"),
+        });
+
+        (texture, depth_texture_bind_group_layout, depth_texture_bind_group)
     }
 
     fn setup_texture(
@@ -489,7 +550,15 @@ impl State {
             }),
             primitive_topology: topology,
             color_states: color_states,
-            depth_stencil_state: None,
+            depth_stencil_state: Some(wgpu::DepthStencilStateDescriptor {
+                format: Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil_front: wgpu::StencilStateFaceDescriptor::IGNORE,
+                stencil_back: wgpu::StencilStateFaceDescriptor::IGNORE,
+                stencil_read_mask: 0,
+                stencil_write_mask: 0,
+            }),
             vertex_state: wgpu::VertexStateDescriptor {
                 index_format: wgpu::IndexFormat::Uint16,
                 vertex_buffers: vertex_buffers,
