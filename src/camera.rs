@@ -173,7 +173,7 @@ impl CameraController {
             cgmath::Deg(-self.x_delta as f32 * 0.01 * self.mouse_speed),
         );
         camera.target = camera.eye + pitch * yaw * (camera.target - camera.eye);
-        camera.up = pitch * yaw * camera.up;
+        //camera.up = pitch * yaw * camera.up;
         //println!("{:#?}", (self.x_delta, self.y_delta));
         self.x_delta = 0.0;
         self.y_delta = 0.0;

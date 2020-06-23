@@ -62,7 +62,7 @@ impl State {
         let (camera, camera_controller) = Self::setup_camera(&sc_desc);
 
         let (uniforms, uniform_buffer, uniform_bind_group_layout, uniform_bind_group) =
-            Self::setup_uniforms(&device, &camera, &instance_buffer);
+            Self::setup_uniforms(&device, &camera);
         let (vs, fs) = Self::setup_shader(&device);
 
         let default_render_pipeline = Self::setup_default_render_pipeline(
@@ -72,7 +72,7 @@ impl State {
             &vs,
             &fs,
             wgpu::PrimitiveTopology::TriangleList,
-            &[Vertex::VERTEX_BUFF_DESC],
+            &[Vertex::desc(), InstanceRaw::desc()],
         );
         let clear_color = wgpu::Color {
             r: 0.1,
@@ -173,6 +173,7 @@ impl State {
             render_pass.set_bind_group(0, &self.texture_bind_group, &[]);
             render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..));
             render_pass.draw_indexed(0..self.num_indices, 0, 0..Instance::NUM_INSTANCES);
         }
@@ -250,7 +251,6 @@ impl State {
     fn setup_uniforms(
         device: &wgpu::Device,
         camera: &Camera,
-        instance_buffer: &wgpu::Buffer,
     ) -> (
         Uniforms,
         wgpu::Buffer,
@@ -268,39 +268,22 @@ impl State {
         let uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("uniform_bind_group_layout"),
-                bindings: &[
-                    wgpu::BindGroupLayoutEntry::new(
-                        0,
-                        wgpu::ShaderStage::VERTEX,
-                        wgpu::BindingType::UniformBuffer {
-                            dynamic: false,
-                            min_binding_size: None,
-                        },
-                    ),
-                    wgpu::BindGroupLayoutEntry::new(
-                        1,
-                        wgpu::ShaderStage::VERTEX,
-                        wgpu::BindingType::StorageBuffer {
-                            dynamic: false,
-                            min_binding_size: None,
-                            readonly: true,
-                        },
-                    ),
-                ],
+                bindings: &[wgpu::BindGroupLayoutEntry::new(
+                    0,
+                    wgpu::ShaderStage::VERTEX,
+                    wgpu::BindingType::UniformBuffer {
+                        dynamic: false,
+                        min_binding_size: None,
+                    },
+                )],
             });
 
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &uniform_bind_group_layout,
-            bindings: &[
-                wgpu::Binding {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(uniform_buffer.slice(..)),
-                },
-                wgpu::Binding {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer(instance_buffer.slice(..)),
-                },
-            ],
+            bindings: &[wgpu::Binding {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(uniform_buffer.slice(..)),
+            }],
             label: Some("uniform_bind_group"),
         });
 
@@ -320,17 +303,13 @@ impl State {
     }
 
     fn setup_vertex_input(device: &wgpu::Device) -> (wgpu::Buffer, u32, wgpu::Buffer, u32) {
-        let vertex_buffer = device.create_buffer_with_data(
-            bytemuck::cast_slice(Vertex::VERTICES),
-            wgpu::BufferUsage::VERTEX,
-        );
-        let num_vertices = Vertex::VERTICES.len() as u32;
+        let vertex_buffer = device
+            .create_buffer_with_data(bytemuck::cast_slice(VERTICES), wgpu::BufferUsage::VERTEX);
+        let num_vertices = VERTICES.len() as u32;
 
-        let index_buffer = device.create_buffer_with_data(
-            bytemuck::cast_slice(Vertex::INDICES),
-            wgpu::BufferUsage::INDEX,
-        );
-        let num_indices = Vertex::INDICES.len() as u32;
+        let index_buffer =
+            device.create_buffer_with_data(bytemuck::cast_slice(INDICES), wgpu::BufferUsage::INDEX);
+        let num_indices = INDICES.len() as u32;
 
         (vertex_buffer, num_vertices, index_buffer, num_indices)
     }
@@ -439,7 +418,7 @@ impl State {
         let instance_data: Vec<InstanceRaw> = instances.iter().map(Instance::to_raw).collect();
         let instance_buffer = device.create_buffer_with_data(
             bytemuck::cast_slice(&instance_data),
-            wgpu::BufferUsage::STORAGE,
+            wgpu::BufferUsage::VERTEX,
         );
         (instances, instance_buffer)
     }
