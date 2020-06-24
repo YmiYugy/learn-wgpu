@@ -41,6 +41,7 @@ pub struct CameraController {
     pub mouse_can_be_activated: bool,
     pub x_delta: f64,
     pub y_delta: f64,
+    pub alt: bool,
 }
 
 impl CameraController {
@@ -58,6 +59,7 @@ impl CameraController {
             mouse_can_be_activated: true,
             x_delta: 0.0,
             y_delta: 0.0,
+            alt: false,
         }
     }
 
@@ -114,6 +116,14 @@ impl CameraController {
                         _ => false,
                     }
                 }
+                WindowEvent::ModifiersChanged(m) => {
+                    if self.alt != m.alt() {
+                        self.alt = m.alt();
+                        true
+                    } else {
+                        false
+                    }
+                }
                 _ => false,
             },
             Event::DeviceEvent { event, .. } => match event {
@@ -134,34 +144,39 @@ impl CameraController {
 
     pub fn update_camera(&mut self, camera: &mut Camera) {
         let forward = (camera.target - camera.eye).normalize();
+        let speed = if self.alt {
+            self.movement_speed * 5.0
+        } else {
+            self.movement_speed
+        };
 
         if self.is_forward_pressed {
-            camera.eye += forward * self.movement_speed;
-            camera.target += forward * self.movement_speed;
+            camera.eye += forward * speed;
+            camera.target += forward * speed;
         }
         if self.is_backward_pressed {
-            camera.eye -= forward * self.movement_speed;
-            camera.target -= forward * self.movement_speed;
+            camera.eye -= forward * speed;
+            camera.target -= forward * speed;
         }
 
         let right = forward.cross(camera.up);
 
         if self.is_right_pressend {
-            camera.eye += right * self.movement_speed;
-            camera.target += right * self.movement_speed;
+            camera.eye += right * speed;
+            camera.target += right * speed;
         }
         if self.is_left_pressed {
-            camera.eye -= right * self.movement_speed;
-            camera.target -= right * self.movement_speed;
+            camera.eye -= right * speed;
+            camera.target -= right * speed;
         }
 
         if self.is_up_pressed {
-            camera.eye += camera.up * self.movement_speed;
-            camera.target += camera.up * self.movement_speed;
+            camera.eye += camera.up * speed;
+            camera.target += camera.up * speed;
         }
         if self.is_down_pressed {
-            camera.eye -= camera.up * self.movement_speed;
-            camera.target -= camera.up * self.movement_speed;
+            camera.eye -= camera.up * speed;
+            camera.target -= camera.up * speed;
         }
 
         let pitch = cgmath::Matrix3::from_axis_angle(

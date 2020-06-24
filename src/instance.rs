@@ -13,7 +13,7 @@ impl Instance {
     }
 
     pub const SPACE_BETWEEN: f32 = 3.0;
-    pub const NUM_INSTANCES_PER_ROW: u32 = 10;
+    pub const NUM_INSTANCES_PER_ROW: u32 = 100;
     pub const NUM_INSTANCES: u32 =
         Instance::NUM_INSTANCES_PER_ROW * Instance::NUM_INSTANCES_PER_ROW;
     pub const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
