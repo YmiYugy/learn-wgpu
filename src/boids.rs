@@ -94,8 +94,8 @@ impl<'c> Boids<'c> {
             let mut rng = rand::thread_rng();
 
             let boids: Vec<_> = std::iter::repeat_with(|| Boid {
-                pos: [(rng.gen()-0.5)*5.0, (rng.gen()-0.5)*5.0, (rng.gen()-0.5)*5.0, 1.0],
-                vel: [(rng.gen()-0.5)*5.0, (rng.gen()-0.5)*5.0, (rng.gen()-0.5)*5.0, 0.0],
+                pos: [(rng.gen::<f32>()-0.5)*5.0, (rng.gen::<f32>()-0.5)*5.0, (rng.gen::<f32>()-0.5)*5.0, 1.0],
+                vel: [(rng.gen::<f32>()-0.5)*5.0, (rng.gen::<f32>()-0.5)*5.0, (rng.gen::<f32>()-0.5)*5.0, 0.0],
             })
             .take(num_instances as usize)
             .collect();
