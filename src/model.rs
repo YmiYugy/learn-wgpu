@@ -206,55 +206,33 @@ impl Renderable for Model {
         format: Option<wgpu::TextureFormat>,
         shaders: Option<(&wgpu::ShaderModule, Option<&wgpu::ShaderModule>)>,
     ) -> wgpu::RenderPipeline {
-        if layouts.is_some() {
-            if shaders.is_some() {
-                Self::create_render_pipeline(
-                    device,
-                    layouts.unwrap(),
-                    format.unwrap(),
-                    shaders.unwrap().0,
-                    shaders.unwrap().1,
-                    wgpu::PrimitiveTopology::TriangleList,
-                    Self::setup_vertex_input().as_ref(),
-                )
-            } else {
-                let (vs, fs) = Self::setup_shader(device);
-                Self::create_render_pipeline(
-                    device,
-                    layouts.unwrap(),
-                    format.unwrap(),
-                    &vs,
-                    fs.as_ref(),
-                    wgpu::PrimitiveTopology::TriangleList,
-                    Self::setup_vertex_input().as_ref(),
-                )
-            }
+        if shaders.is_some() {
+            Self::create_render_pipeline(
+                device,
+                layouts.unwrap_or(
+                    &Self::setup_bind_group_layouts(device)
+                        .iter()
+                        .collect::<Vec<&wgpu::BindGroupLayout>>(),
+                ),
+                format.unwrap(),
+                shaders.unwrap(),
+                wgpu::PrimitiveTopology::TriangleList,
+                Self::setup_vertex_input().as_ref(),
+            )
         } else {
-            let layouts_v = Self::setup_bind_group_layouts(device);
-            let layouts_v: Vec<&wgpu::BindGroupLayout> = layouts_v.iter().collect();
-            let layouts = layouts_v.as_slice();
-            if shaders.is_some() {
-                Self::create_render_pipeline(
-                    device,
-                    layouts,
-                    format.unwrap(),
-                    shaders.unwrap().0,
-                    shaders.unwrap().1,
-                    wgpu::PrimitiveTopology::TriangleList,
-                    Self::setup_vertex_input().as_ref(),
-                )
-            } else {
-                let (vs, fs) = Self::setup_shader(device);
-                Self::create_render_pipeline(
-                    device,
-                    layouts,
-                    format.unwrap(),
-                    &vs,
-                    fs.as_ref(),
-                    wgpu::PrimitiveTopology::TriangleList,
-                    Self::setup_vertex_input().as_ref(),
-                )
-            }
+            let (vs, fs) = Self::setup_shader(device);
+            Self::create_render_pipeline(
+                device,
+                layouts.unwrap_or(
+                    &Self::setup_bind_group_layouts(device)
+                        .iter()
+                        .collect::<Vec<&wgpu::BindGroupLayout>>(),
+                ),
+                format.unwrap(),
+                (&vs, fs.as_ref()),
+                wgpu::PrimitiveTopology::TriangleList,
+                Self::setup_vertex_input().as_ref(),
+            )
         }
     }
 }

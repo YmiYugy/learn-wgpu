@@ -2,7 +2,8 @@ use super::camera::*;
 use super::instance::*;
 use super::model::*;
 use super::texture::*;
-use super::uniforms::Uniforms;
+use super::point_cloud::*;
+use super::uniforms::*;
 use winit::{event::*, window::Window};
 
 pub struct State {
@@ -30,6 +31,9 @@ pub struct State {
     pub uniform_buffer: wgpu::Buffer,
     pub uniform_bind_group: wgpu::BindGroup,
 
+    pub point_cloud: PointCloud,
+    pub point_cloud_pipeline: wgpu::RenderPipeline,
+
     pub model_render_pipeline: wgpu::RenderPipeline,
     pub default: bool,
     pub clear_color: wgpu::Color,
@@ -55,6 +59,9 @@ impl State {
 
         let (uniforms, uniform_buffer) = Self::setup_uniforms(&device, &camera);
         let uniform_bind_group = Uniforms::create_bind_group(&device, &uniform_buffer, Some(&uniform_layout));
+
+        let point_cloud = PointCloud::new_sphere(&device, 1000);
+        let point_cloud_pipeline = PointCloud::setup_default_render_pipeline(&device, Some(&[&uniform_layout]), Some(sc_desc.format), None);
 
         let model_render_pipeline = Model::setup_default_render_pipeline(
             &device,
@@ -89,6 +96,8 @@ impl State {
             model_render_pipeline,
             default: true,
             clear_color,
+            point_cloud,
+            point_cloud_pipeline,
         }
     }
 
@@ -174,6 +183,9 @@ impl State {
                 0..self.instances.len() as u32,
                 &self.uniform_bind_group,
             );
+            
+            render_pass.set_pipeline(&self.point_cloud_pipeline);
+            render_pass.draw_point_cloud_instanced(&self.point_cloud, &self.instance_buffer, 0..self.instances.len() as u32 ,&self.uniform_bind_group);
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -346,8 +358,7 @@ pub trait Renderable {
         device: &wgpu::Device,
         bind_group_layouts: &[&wgpu::BindGroupLayout],
         format: wgpu::TextureFormat,
-        vs: &wgpu::ShaderModule,
-        fs: Option<&wgpu::ShaderModule>,
+        (vs, fs): (&wgpu::ShaderModule, Option<&wgpu::ShaderModule>),
         topology: wgpu::PrimitiveTopology,
         vertex_buffers: &[wgpu::VertexBufferDescriptor],
     ) -> wgpu::RenderPipeline {

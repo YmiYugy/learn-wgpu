@@ -2,7 +2,7 @@
 
 layout(location=0) in vec3 a_position;
 
-layout(location = 2) in mat4 a_model;
+layout(location = 3) in mat4 a_model;
 
 layout(set=1, binding=0) 
 uniform Uniforms {
@@ -10,6 +10,5 @@ uniform Uniforms {
 };
 
 void main() {
-    v_tex_coords = a_tex_coords;
     gl_Position = u_view_proj * a_model * vec4(a_position, 1.0);
 }
