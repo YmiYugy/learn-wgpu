@@ -3,10 +3,6 @@ use super::instance::*;
 use super::model::*;
 use super::texture::*;
 use super::uniforms::Uniforms;
-use cgmath::InnerSpace;
-use cgmath::Rotation3;
-use cgmath::Zero;
-use include_glsl::include_glsl;
 use winit::{event::*, window::Window};
 
 pub struct State {
@@ -27,9 +23,6 @@ pub struct State {
     pub instances: Vec<Instance>,
     pub instance_buffer: wgpu::Buffer,
 
-    pub texture: Texture,
-    pub texture_bind_group: wgpu::BindGroup,
-
     pub camera: Camera,
     pub camera_controller: CameraController,
 
@@ -37,7 +30,7 @@ pub struct State {
     pub uniform_buffer: wgpu::Buffer,
     pub uniform_bind_group: wgpu::BindGroup,
 
-    pub default_render_pipeline: wgpu::RenderPipeline,
+    pub model_render_pipeline: wgpu::RenderPipeline,
     pub default: bool,
     pub clear_color: wgpu::Color,
 }
@@ -52,27 +45,22 @@ impl State {
 
         let depth_texture = Texture::create_depth_texture(&device, &sc_desc, "depth_texture");
 
-        let (instances, instance_buffer) = Self::setup_instances(&device);
+        let (instances, instance_buffer) = Instance::setup_instances(&device);
 
-        let (texture, texture_bind_group_layout, texture_bind_group) =
-            Self::setup_texture(&device, &queue);
-
-        let obj_model = Self::setup_obj_model(&device, &queue, &texture_bind_group_layout);
+        let texture_layout = Texture::setup_bing_group_layout(&device);
+        let uniform_layout = Uniforms::setup_bing_group_layout(&device);
+        let obj_model = Self::setup_obj_model(&device, &queue, &texture_layout);
 
         let (camera, camera_controller) = Self::setup_camera(&sc_desc);
 
-        let (uniforms, uniform_buffer, uniform_bind_group_layout, uniform_bind_group) =
-            Self::setup_uniforms(&device, &camera);
-        let (vs, fs) = Self::setup_shader(&device);
+        let (uniforms, uniform_buffer) = Self::setup_uniforms(&device, &camera);
+        let uniform_bind_group = Uniforms::create_bind_group(&device, &uniform_buffer, Some(&uniform_layout));
 
-        let default_render_pipeline = Self::setup_default_render_pipeline(
+        let model_render_pipeline = Model::setup_default_render_pipeline(
             &device,
-            &[&texture_bind_group_layout, &uniform_bind_group_layout],
-            sc_desc.format,
-            &vs,
-            &fs,
-            wgpu::PrimitiveTopology::TriangleList,
-            &[ModelVertex::desc(), InstanceRaw::desc()],
+            Some(&[&texture_layout, &uniform_layout]),
+            Some(sc_desc.format),
+            None,
         );
         let clear_color = wgpu::Color {
             r: 0.1,
@@ -93,14 +81,12 @@ impl State {
             obj_model,
             instances,
             instance_buffer,
-            texture,
-            texture_bind_group,
             camera,
             camera_controller,
             uniforms,
             uniform_buffer,
             uniform_bind_group,
-            default_render_pipeline,
+            model_render_pipeline,
             default: true,
             clear_color,
         }
@@ -178,7 +164,7 @@ impl State {
                     stencil_ops: None,
                 }),
             });
-            render_pass.set_pipeline(&self.default_render_pipeline);
+            render_pass.set_pipeline(&self.model_render_pipeline);
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             let mesh = &self.obj_model.meshes[0];
             let material = &self.obj_model.materials[mesh.material];
@@ -260,15 +246,7 @@ impl State {
         (camera, camera_controller)
     }
 
-    fn setup_uniforms(
-        device: &wgpu::Device,
-        camera: &Camera,
-    ) -> (
-        Uniforms,
-        wgpu::Buffer,
-        wgpu::BindGroupLayout,
-        wgpu::BindGroup,
-    ) {
+    fn setup_uniforms(device: &wgpu::Device, camera: &Camera) -> (Uniforms, wgpu::Buffer) {
         let mut uniforms = Uniforms::new();
         uniforms.update_view_proj(&camera);
 
@@ -276,42 +254,7 @@ impl State {
             bytemuck::cast_slice(&[uniforms]),
             wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
         );
-
-        let uniform_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("uniform_bind_group_layout"),
-                bindings: &[wgpu::BindGroupLayoutEntry::new(
-                    0,
-                    wgpu::ShaderStage::VERTEX,
-                    wgpu::BindingType::UniformBuffer {
-                        dynamic: false,
-                        min_binding_size: None,
-                    },
-                )],
-            });
-
-        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &uniform_bind_group_layout,
-            bindings: &[wgpu::Binding {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(uniform_buffer.slice(..)),
-            }],
-            label: Some("uniform_bind_group"),
-        });
-
-        (
-            uniforms,
-            uniform_buffer,
-            uniform_bind_group_layout,
-            uniform_bind_group,
-        )
-    }
-
-    fn setup_shader(device: &wgpu::Device) -> (wgpu::ShaderModule, wgpu::ShaderModule) {
-        let vs = Self::create_shader_module(device, include_glsl!("../shaders/shader.vert"));
-        let fs = Self::create_shader_module(device, include_glsl!("../shaders/shader.frag"));
-
-        (vs, fs)
+        (uniforms, uniform_buffer)
     }
 
     fn setup_obj_model(
@@ -324,153 +267,11 @@ impl State {
         queue.submit(cmds);
         obj_model
     }
+}
 
-    fn setup_texture(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> (Texture, wgpu::BindGroupLayout, wgpu::BindGroup) {
-        let (texture, cmd_buffer) = Texture::from_bytes(
-            &device,
-            include_bytes!("../assets/textures/happy-tree.png"),
-            "happy-tree.png",
-        )
-        .unwrap();
-
-        queue.submit(Some(cmd_buffer));
-
-        let texture_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("texture_bind_group_layout"),
-                bindings: &[
-                    wgpu::BindGroupLayoutEntry::new(
-                        0,
-                        wgpu::ShaderStage::FRAGMENT,
-                        wgpu::BindingType::SampledTexture {
-                            dimension: wgpu::TextureViewDimension::D2,
-                            component_type: wgpu::TextureComponentType::Uint,
-                            multisampled: false,
-                        },
-                    ),
-                    wgpu::BindGroupLayoutEntry::new(
-                        1,
-                        wgpu::ShaderStage::FRAGMENT,
-                        wgpu::BindingType::Sampler { comparison: false },
-                    ),
-                ],
-            });
-
-        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &texture_bind_group_layout,
-            bindings: &[
-                wgpu::Binding {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture.view),
-                },
-                wgpu::Binding {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
-                },
-            ],
-            label: Some("texture_bind_group"),
-        });
-
-        (texture, texture_bind_group_layout, texture_bind_group)
-    }
-
-    fn setup_default_render_pipeline(
-        device: &wgpu::Device,
-        bind_group_layouts: &[&wgpu::BindGroupLayout],
-        format: wgpu::TextureFormat,
-        vs: &wgpu::ShaderModule,
-        fs: &wgpu::ShaderModule,
-        topology: wgpu::PrimitiveTopology,
-        vertex_buffers: &[wgpu::VertexBufferDescriptor],
-    ) -> wgpu::RenderPipeline {
-        let layout = Self::create_pipeline_layout(device, bind_group_layouts);
-        let color_states = [Self::create_color_state_descriptor(format)];
-        let descriptor = Self::create_render_pipeline_descriptor(
-            &layout,
-            vs,
-            Some(fs),
-            topology,
-            &color_states,
-            vertex_buffers,
-        );
-        device.create_render_pipeline(&descriptor)
-    }
-
-    fn setup_instances(device: &wgpu::Device) -> (Vec<Instance>, wgpu::Buffer) {
-        let instances: Vec<Instance> = (0..Instance::NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..Instance::NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let x = Instance::SPACE_BETWEEN
-                        * (x as f32 - Instance::NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let z = Instance::SPACE_BETWEEN
-                        * (z as f32 - Instance::NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let position = cgmath::Vector3::new(x, 0.0, z);
-
-                    let rotation = if position.is_zero() {
-                        cgmath::Quaternion::from_axis_angle(
-                            cgmath::Vector3::unit_z(),
-                            cgmath::Deg(0.0),
-                        )
-                    } else {
-                        cgmath::Quaternion::from_axis_angle(
-                            position.clone().normalize(),
-                            cgmath::Deg(45.0),
-                        )
-                    };
-
-                    Instance { position, rotation }
-                })
-            })
-            .collect();
-
-        let instance_data: Vec<InstanceRaw> = instances.iter().map(Instance::to_raw).collect();
-        let instance_buffer = device.create_buffer_with_data(
-            bytemuck::cast_slice(&instance_data),
-            wgpu::BufferUsage::VERTEX,
-        );
-        (instances, instance_buffer)
-    }
-
-    #[allow(dead_code)]
-    fn create_vertex_buffer_descriptor<'a>(
-        stride: wgpu::BufferAddress,
-        instanced: bool,
-        attributes: &'a [wgpu::VertexAttributeDescriptor],
-    ) -> wgpu::VertexBufferDescriptor<'a> {
-        wgpu::VertexBufferDescriptor {
-            stride: stride,
-            step_mode: if instanced {
-                wgpu::InputStepMode::Instance
-            } else {
-                wgpu::InputStepMode::Vertex
-            },
-            attributes: attributes,
-        }
-    }
-
+pub trait Renderable {
     fn create_shader_module(device: &wgpu::Device, code: &[u32]) -> wgpu::ShaderModule {
         return device.create_shader_module(wgpu::util::make_spirv(bytemuck::cast_slice(code)));
-    }
-
-    fn create_pipeline_layout(
-        device: &wgpu::Device,
-        bind_group_layouts: &[&wgpu::BindGroupLayout],
-    ) -> wgpu::PipelineLayout {
-        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            bind_group_layouts: bind_group_layouts,
-        })
-    }
-
-    fn create_color_state_descriptor(format: wgpu::TextureFormat) -> wgpu::ColorStateDescriptor {
-        wgpu::ColorStateDescriptor {
-            format: format,
-            alpha_blend: wgpu::BlendDescriptor::REPLACE,
-            color_blend: wgpu::BlendDescriptor::REPLACE,
-            write_mask: wgpu::ColorWrite::ALL,
-        }
     }
 
     fn create_render_pipeline_descriptor<'a>(
@@ -522,4 +323,57 @@ impl State {
             alpha_to_coverage_enabled: false,
         }
     }
+
+    fn create_color_state_descriptor(format: wgpu::TextureFormat) -> wgpu::ColorStateDescriptor {
+        wgpu::ColorStateDescriptor {
+            format: format,
+            alpha_blend: wgpu::BlendDescriptor::REPLACE,
+            color_blend: wgpu::BlendDescriptor::REPLACE,
+            write_mask: wgpu::ColorWrite::ALL,
+        }
+    }
+
+    fn create_pipeline_layout(
+        device: &wgpu::Device,
+        bind_group_layouts: &[&wgpu::BindGroupLayout],
+    ) -> wgpu::PipelineLayout {
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            bind_group_layouts: bind_group_layouts,
+        })
+    }
+
+    fn create_render_pipeline(
+        device: &wgpu::Device,
+        bind_group_layouts: &[&wgpu::BindGroupLayout],
+        format: wgpu::TextureFormat,
+        vs: &wgpu::ShaderModule,
+        fs: Option<&wgpu::ShaderModule>,
+        topology: wgpu::PrimitiveTopology,
+        vertex_buffers: &[wgpu::VertexBufferDescriptor],
+    ) -> wgpu::RenderPipeline {
+        let layout = Self::create_pipeline_layout(device, bind_group_layouts);
+        let color_states = [Self::create_color_state_descriptor(format)];
+        let descriptor = Self::create_render_pipeline_descriptor(
+            &layout,
+            vs,
+            fs,
+            topology,
+            &color_states,
+            vertex_buffers,
+        );
+        device.create_render_pipeline(&descriptor)
+    }
+
+    fn setup_shader(device: &wgpu::Device) -> (wgpu::ShaderModule, Option<wgpu::ShaderModule>);
+
+    fn setup_bind_group_layouts(device: &wgpu::Device) -> Vec<wgpu::BindGroupLayout>;
+
+    fn setup_vertex_input<'a>() -> Vec<wgpu::VertexBufferDescriptor<'a>>;
+
+    fn setup_default_render_pipeline(
+        device: &wgpu::Device,
+        layouts: Option<&[&wgpu::BindGroupLayout]>,
+        format: Option<wgpu::TextureFormat>,
+        shaders: Option<(&wgpu::ShaderModule, Option<&wgpu::ShaderModule>)>,
+    ) -> wgpu::RenderPipeline;
 }

@@ -137,4 +137,43 @@ impl Texture {
         let img = image::open(path)?;
         Self::from_image(device, &img, label)
     }
+
+    pub fn setup_bing_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout{
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("texture_bind_group_layout"),
+                bindings: &[
+                    wgpu::BindGroupLayoutEntry::new(
+                        0,
+                        wgpu::ShaderStage::FRAGMENT,
+                        wgpu::BindingType::SampledTexture {
+                            dimension: wgpu::TextureViewDimension::D2,
+                            component_type: wgpu::TextureComponentType::Uint,
+                            multisampled: false,
+                        },
+                    ),
+                    wgpu::BindGroupLayoutEntry::new(
+                        1,
+                        wgpu::ShaderStage::FRAGMENT,
+                        wgpu::BindingType::Sampler { comparison: false },
+                    ),
+                ],
+            })
+    }
+
+    pub fn create_bind_group(&self, device: &wgpu::Device, layout: Option<&wgpu::BindGroupLayout>) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: layout.unwrap_or(&Self::setup_bing_group_layout(device)),
+            bindings: &[
+                    wgpu::Binding {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&self.view),
+                    },
+                    wgpu::Binding {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+                label: None,
+        })
+    }
 }

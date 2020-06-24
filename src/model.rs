@@ -1,4 +1,8 @@
+use super::instance::*;
+use super::state::*;
 use super::texture::*;
+use super::uniforms::*;
+use include_glsl::include_glsl;
 use std::{ops::Range, path::Path, path::PathBuf};
 
 pub trait Vertex {
@@ -8,9 +12,9 @@ pub trait Vertex {
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct ModelVertex {
-    pub position: [f32; 3],
+    pub position: [f32; 4],
+    pub normal: [f32; 4],
     pub tex_coords: [f32; 2],
-    pub normal: [f32; 3],
 }
 
 impl Vertex for ModelVertex {
@@ -18,7 +22,7 @@ impl Vertex for ModelVertex {
         wgpu::VertexBufferDescriptor {
             stride: std::mem::size_of::<ModelVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::InputStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float3, 1 => Float2],
+            attributes: &wgpu::vertex_attr_array![0 => Float4, 1 => Float4, 2 => Float2],
         }
     }
 }
@@ -68,20 +72,7 @@ impl Model {
             let (diffuse_texture, cmds) =
                 Texture::load(&device, containing_folder.join(diffuse_path))?;
 
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout,
-                bindings: &[
-                    wgpu::Binding {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                    },
-                    wgpu::Binding {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                    },
-                ],
-                label: None,
-            });
+            let bind_group = diffuse_texture.create_bind_group(device, Some(layout));
 
             materials.push(Material {
                 name: mat.name,
@@ -100,12 +91,14 @@ impl Model {
                         m.mesh.positions[i * 3],
                         m.mesh.positions[i * 3 + 1],
                         m.mesh.positions[i * 3 + 2],
+                        1.0,
                     ],
                     tex_coords: [m.mesh.texcoords[i * 2], m.mesh.texcoords[i * 2 + 1]],
                     normal: [
                         m.mesh.normals[i * 3],
                         m.mesh.normals[i * 3 + 1],
                         m.mesh.normals[i * 3 + 2],
+                        0.0,
                     ],
                 });
             }
@@ -188,6 +181,80 @@ where
         for mesh in &model.meshes {
             let material = &model.materials[mesh.material];
             self.draw_mesh_instanced(mesh, material, instances.clone(), uniforms);
+        }
+    }
+}
+
+impl Renderable for Model {
+    fn setup_shader(device: &wgpu::Device) -> (wgpu::ShaderModule, Option<wgpu::ShaderModule>) {
+        let vs = Self::create_shader_module(device, include_glsl!("../shaders/textured.vert"));
+        let fs = Self::create_shader_module(device, include_glsl!("../shaders/textured.frag"));
+
+        (vs, Some(fs))
+    }
+    fn setup_bind_group_layouts(device: &wgpu::Device) -> Vec<wgpu::BindGroupLayout> {
+        let texture_layout = Texture::setup_bing_group_layout(device);
+        let uniform_layout = Uniforms::setup_bing_group_layout(device);
+        vec![texture_layout, uniform_layout]
+    }
+    fn setup_vertex_input<'a>() -> Vec<wgpu::VertexBufferDescriptor<'a>> {
+        vec![ModelVertex::desc(), InstanceRaw::desc()]
+    }
+    fn setup_default_render_pipeline(
+        device: &wgpu::Device,
+        layouts: Option<&[&wgpu::BindGroupLayout]>,
+        format: Option<wgpu::TextureFormat>,
+        shaders: Option<(&wgpu::ShaderModule, Option<&wgpu::ShaderModule>)>,
+    ) -> wgpu::RenderPipeline {
+        if layouts.is_some() {
+            if shaders.is_some() {
+                Self::create_render_pipeline(
+                    device,
+                    layouts.unwrap(),
+                    format.unwrap(),
+                    shaders.unwrap().0,
+                    shaders.unwrap().1,
+                    wgpu::PrimitiveTopology::TriangleList,
+                    Self::setup_vertex_input().as_ref(),
+                )
+            } else {
+                let (vs, fs) = Self::setup_shader(device);
+                Self::create_render_pipeline(
+                    device,
+                    layouts.unwrap(),
+                    format.unwrap(),
+                    &vs,
+                    fs.as_ref(),
+                    wgpu::PrimitiveTopology::TriangleList,
+                    Self::setup_vertex_input().as_ref(),
+                )
+            }
+        } else {
+            let layouts_v = Self::setup_bind_group_layouts(device);
+            let layouts_v: Vec<&wgpu::BindGroupLayout> = layouts_v.iter().collect();
+            let layouts = layouts_v.as_slice();
+            if shaders.is_some() {
+                Self::create_render_pipeline(
+                    device,
+                    layouts,
+                    format.unwrap(),
+                    shaders.unwrap().0,
+                    shaders.unwrap().1,
+                    wgpu::PrimitiveTopology::TriangleList,
+                    Self::setup_vertex_input().as_ref(),
+                )
+            } else {
+                let (vs, fs) = Self::setup_shader(device);
+                Self::create_render_pipeline(
+                    device,
+                    layouts,
+                    format.unwrap(),
+                    &vs,
+                    fs.as_ref(),
+                    wgpu::PrimitiveTopology::TriangleList,
+                    Self::setup_vertex_input().as_ref(),
+                )
+            }
         }
     }
 }
