@@ -48,8 +48,8 @@ impl PointCloud {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
-struct Point {
-    pos: [f32; 4],
+pub struct Point {
+    pub pos: [f32; 4],
 }
 
 unsafe impl bytemuck::Pod for Point {}
@@ -71,7 +71,7 @@ impl Renderable for PointCloud {
             Self::create_shader_module(device, include_glsl!("../shaders/point_cloud.vert")),
             Some(Self::create_shader_module(
                 device,
-                include_glsl!("../shaders/point_cloud.vert"),
+                include_glsl!("../shaders/point_cloud.frag"),
             )),
         )
     }
@@ -79,7 +79,9 @@ impl Renderable for PointCloud {
         vec![Uniforms::setup_bing_group_layout(device)]
     }
     fn setup_vertex_input<'a>() -> Vec<wgpu::VertexBufferDescriptor<'a>> {
-        vec![Point::desc(), InstanceRaw::desc()]
+        let desc1= Point::desc();
+        let desc2 = InstanceRaw::desc();
+        vec![desc1, desc2]
     }
     fn setup_default_render_pipeline(
         device: &wgpu::Device,
@@ -146,6 +148,7 @@ where
         uniforms: &'b wgpu::BindGroup,
     ) {
         self.set_vertex_buffer(0, point_cloud.vertex_buffer.slice(..));
+        self.set_vertex_buffer(1, instance_buffer.slice(..));
         self.set_bind_group(0, &uniforms, &[]);
         self.draw(0..point_cloud.num_vertices, instances);
     }

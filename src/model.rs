@@ -18,7 +18,7 @@ pub struct ModelVertex {
 }
 
 impl Vertex for ModelVertex {
-    fn desc<'a>() -> wgpu::VertexBufferDescriptor<'a> {
+    fn desc<'a>() -> wgpu::VertexBufferDescriptor<'a>  {
         wgpu::VertexBufferDescriptor {
             stride: std::mem::size_of::<ModelVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::InputStepMode::Vertex,
@@ -198,7 +198,9 @@ impl Renderable for Model {
         vec![texture_layout, uniform_layout]
     }
     fn setup_vertex_input<'a>() -> Vec<wgpu::VertexBufferDescriptor<'a>> {
-        vec![ModelVertex::desc(), InstanceRaw::desc()]
+        let desc1 = ModelVertex::desc();
+        let desc2 = InstanceRaw::desc();
+        vec![desc1, desc2]
     }
     fn setup_default_render_pipeline(
         device: &wgpu::Device,

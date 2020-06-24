@@ -1,8 +1,8 @@
 use super::camera::*;
 use super::instance::*;
 use super::model::*;
-use super::texture::*;
 use super::point_cloud::*;
+use super::texture::*;
 use super::uniforms::*;
 use winit::{event::*, window::Window};
 
@@ -58,10 +58,16 @@ impl State {
         let (camera, camera_controller) = Self::setup_camera(&sc_desc);
 
         let (uniforms, uniform_buffer) = Self::setup_uniforms(&device, &camera);
-        let uniform_bind_group = Uniforms::create_bind_group(&device, &uniform_buffer, Some(&uniform_layout));
+        let uniform_bind_group =
+            Uniforms::create_bind_group(&device, &uniform_buffer, Some(&uniform_layout));
 
         let point_cloud = PointCloud::new_sphere(&device, 1000);
-        let point_cloud_pipeline = PointCloud::setup_default_render_pipeline(&device, Some(&[&uniform_layout]), Some(sc_desc.format), None);
+        let point_cloud_pipeline = PointCloud::setup_default_render_pipeline(
+            &device,
+            Some(&[&uniform_layout]),
+            Some(sc_desc.format),
+            None,
+        );
 
         let model_render_pipeline = Model::setup_default_render_pipeline(
             &device,
@@ -183,9 +189,14 @@ impl State {
                 0..self.instances.len() as u32,
                 &self.uniform_bind_group,
             );
-            
+
             render_pass.set_pipeline(&self.point_cloud_pipeline);
-            render_pass.draw_point_cloud_instanced(&self.point_cloud, &self.instance_buffer, 0..self.instances.len() as u32 ,&self.uniform_bind_group);
+            render_pass.draw_point_cloud_instanced(
+                &self.point_cloud,
+                &self.instance_buffer,
+                0..self.instances.len() as u32,
+                &self.uniform_bind_group,
+            );
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -282,7 +293,7 @@ impl State {
 }
 
 pub trait Renderable {
-    fn create_shader_module(device: &wgpu::Device, code: &[u32]) -> wgpu::ShaderModule {
+    fn create_shader_module(device: & wgpu::Device, code: &[u32]) -> wgpu::ShaderModule {
         return device.create_shader_module(wgpu::util::make_spirv(bytemuck::cast_slice(code)));
     }
 
@@ -346,19 +357,19 @@ pub trait Renderable {
     }
 
     fn create_pipeline_layout(
-        device: &wgpu::Device,
-        bind_group_layouts: &[&wgpu::BindGroupLayout],
+        device: & wgpu::Device,
+        bind_group_layouts: & [& wgpu::BindGroupLayout],
     ) -> wgpu::PipelineLayout {
-        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        device.create_pipeline_layout(& wgpu::PipelineLayoutDescriptor {
             bind_group_layouts: bind_group_layouts,
         })
     }
 
     fn create_render_pipeline(
-        device: &wgpu::Device,
-        bind_group_layouts: &[&wgpu::BindGroupLayout],
+        device: & wgpu::Device,
+        bind_group_layouts: & [& wgpu::BindGroupLayout],
         format: wgpu::TextureFormat,
-        (vs, fs): (&wgpu::ShaderModule, Option<&wgpu::ShaderModule>),
+        (vs, fs): (& wgpu::ShaderModule, Option<& wgpu::ShaderModule>),
         topology: wgpu::PrimitiveTopology,
         vertex_buffers: &[wgpu::VertexBufferDescriptor],
     ) -> wgpu::RenderPipeline {
@@ -375,16 +386,16 @@ pub trait Renderable {
         device.create_render_pipeline(&descriptor)
     }
 
-    fn setup_shader(device: &wgpu::Device) -> (wgpu::ShaderModule, Option<wgpu::ShaderModule>);
+    fn setup_shader(device: & wgpu::Device) -> (wgpu::ShaderModule, Option<wgpu::ShaderModule>);
 
-    fn setup_bind_group_layouts(device: &wgpu::Device) -> Vec<wgpu::BindGroupLayout>;
+    fn setup_bind_group_layouts(device: & wgpu::Device) -> Vec<wgpu::BindGroupLayout>;
 
     fn setup_vertex_input<'a>() -> Vec<wgpu::VertexBufferDescriptor<'a>>;
 
     fn setup_default_render_pipeline(
-        device: &wgpu::Device,
-        layouts: Option<&[&wgpu::BindGroupLayout]>,
+        device: & wgpu::Device,
+        layouts: Option<& [& wgpu::BindGroupLayout]>,
         format: Option<wgpu::TextureFormat>,
-        shaders: Option<(&wgpu::ShaderModule, Option<&wgpu::ShaderModule>)>,
+        shaders: Option<(& wgpu::ShaderModule, Option<& wgpu::ShaderModule>)>,
     ) -> wgpu::RenderPipeline;
 }

@@ -41,7 +41,7 @@ pub struct CameraController {
     pub mouse_can_be_activated: bool,
     pub x_delta: f64,
     pub y_delta: f64,
-    pub alt: bool,
+    pub ctrl: bool,
 }
 
 impl CameraController {
@@ -59,7 +59,7 @@ impl CameraController {
             mouse_can_be_activated: true,
             x_delta: 0.0,
             y_delta: 0.0,
-            alt: false,
+            ctrl: false,
         }
     }
 
@@ -117,8 +117,8 @@ impl CameraController {
                     }
                 }
                 WindowEvent::ModifiersChanged(m) => {
-                    if self.alt != m.alt() {
-                        self.alt = m.alt();
+                    if self.ctrl != m.ctrl() {
+                        self.ctrl = m.ctrl();
                         true
                     } else {
                         false
@@ -144,7 +144,7 @@ impl CameraController {
 
     pub fn update_camera(&mut self, camera: &mut Camera) {
         let forward = (camera.target - camera.eye).normalize();
-        let speed = if self.alt {
+        let speed = if self.ctrl {
             self.movement_speed * 5.0
         } else {
             self.movement_speed
