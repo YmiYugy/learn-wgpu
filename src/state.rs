@@ -1,8 +1,8 @@
 use super::camera::*;
 use super::instance::*;
+use super::model::*;
 use super::texture::*;
 use super::uniforms::Uniforms;
-use super::vertex::*;
 use cgmath::InnerSpace;
 use cgmath::Rotation3;
 use cgmath::Zero;
@@ -22,10 +22,7 @@ pub struct State {
 
     pub depth_texture: Texture,
 
-    pub vertex_buffer: wgpu::Buffer,
-    pub num_vertices: u32,
-    pub index_buffer: wgpu::Buffer,
-    pub num_indices: u32,
+    obj_model: Model,
 
     pub instances: Vec<Instance>,
     pub instance_buffer: wgpu::Buffer,
@@ -55,13 +52,12 @@ impl State {
 
         let depth_texture = Texture::create_depth_texture(&device, &sc_desc, "depth_texture");
 
-        let (vertex_buffer, num_vertices, index_buffer, num_indices) =
-            Self::setup_vertex_input(&device);
-
         let (instances, instance_buffer) = Self::setup_instances(&device);
 
         let (texture, texture_bind_group_layout, texture_bind_group) =
             Self::setup_texture(&device, &queue);
+
+        let obj_model = Self::setup_obj_model(&device, &queue, &texture_bind_group_layout);
 
         let (camera, camera_controller) = Self::setup_camera(&sc_desc);
 
@@ -76,7 +72,7 @@ impl State {
             &vs,
             &fs,
             wgpu::PrimitiveTopology::TriangleList,
-            &[Vertex::desc(), InstanceRaw::desc()],
+            &[ModelVertex::desc(), InstanceRaw::desc()],
         );
         let clear_color = wgpu::Color {
             r: 0.1,
@@ -94,10 +90,7 @@ impl State {
             swap_chain,
             sc_desc,
             depth_texture,
-            vertex_buffer,
-            num_vertices,
-            index_buffer,
-            num_indices,
+            obj_model,
             instances,
             instance_buffer,
             texture,
@@ -118,6 +111,8 @@ impl State {
         self.sc_desc.width = new_size.width;
         self.sc_desc.height = new_size.height;
         self.swap_chain = self.device.create_swap_chain(&self.surface, &self.sc_desc);
+        self.camera.aspect = self.sc_desc.width as f32 / self.sc_desc.height as f32;
+
         self.depth_texture =
             Texture::create_depth_texture(&self.device, &self.sc_desc, "depth_texture");
     }
@@ -184,12 +179,15 @@ impl State {
                 }),
             });
             render_pass.set_pipeline(&self.default_render_pipeline);
-            render_pass.set_bind_group(0, &self.texture_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..));
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..Instance::NUM_INSTANCES);
+            let mesh = &self.obj_model.meshes[0];
+            let material = &self.obj_model.materials[mesh.material];
+            render_pass.draw_mesh_instanced(
+                mesh,
+                material,
+                0..self.instances.len() as u32,
+                &self.uniform_bind_group,
+            );
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -248,7 +246,7 @@ impl State {
 
     fn setup_camera(sc_desc: &wgpu::SwapChainDescriptor) -> (Camera, CameraController) {
         let camera = Camera {
-            eye: (0.0, 1.0, 2.0).into(),
+            eye: (0.0, 25.0, 30.0).into(),
             target: (0.0, 0.0, 0.0).into(),
             up: cgmath::Vector3::unit_y(),
             aspect: sc_desc.width as f32 / sc_desc.height as f32,
@@ -257,7 +255,7 @@ impl State {
             zfar: 100.0,
         };
 
-        let camera_controller = CameraController::new(0.05, 10.0);
+        let camera_controller = CameraController::new(0.2, 10.0);
 
         (camera, camera_controller)
     }
@@ -316,16 +314,15 @@ impl State {
         (vs, fs)
     }
 
-    fn setup_vertex_input(device: &wgpu::Device) -> (wgpu::Buffer, u32, wgpu::Buffer, u32) {
-        let vertex_buffer = device
-            .create_buffer_with_data(bytemuck::cast_slice(VERTICES), wgpu::BufferUsage::VERTEX);
-        let num_vertices = VERTICES.len() as u32;
-
-        let index_buffer =
-            device.create_buffer_with_data(bytemuck::cast_slice(INDICES), wgpu::BufferUsage::INDEX);
-        let num_indices = INDICES.len() as u32;
-
-        (vertex_buffer, num_vertices, index_buffer, num_indices)
+    fn setup_obj_model(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Model {
+        let (obj_model, cmds) =
+            Model::load(&device, &bind_group_layout, "assets/models/cube.obj").unwrap();
+        queue.submit(cmds);
+        obj_model
     }
 
     fn setup_texture(
@@ -406,11 +403,11 @@ impl State {
         let instances: Vec<Instance> = (0..Instance::NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
                 (0..Instance::NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let position = cgmath::Vector3 {
-                        x: x as f32,
-                        y: 0.0,
-                        z: z as f32,
-                    } - Instance::INSTANCE_DISPLACEMENT;
+                    let x = Instance::SPACE_BETWEEN
+                        * (x as f32 - Instance::NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                    let z = Instance::SPACE_BETWEEN
+                        * (z as f32 - Instance::NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                    let position = cgmath::Vector3::new(x, 0.0, z);
 
                     let rotation = if position.is_zero() {
                         cgmath::Quaternion::from_axis_angle(
@@ -517,7 +514,7 @@ impl State {
                 stencil_write_mask: 0,
             }),
             vertex_state: wgpu::VertexStateDescriptor {
-                index_format: wgpu::IndexFormat::Uint16,
+                index_format: wgpu::IndexFormat::Uint32,
                 vertex_buffers: vertex_buffers,
             },
             sample_count: 1,

@@ -1,4 +1,5 @@
 use image::GenericImageView;
+use std::path::Path;
 
 pub struct Texture {
     pub texture: wgpu::Texture,
@@ -21,7 +22,7 @@ impl Texture {
         img: &image::DynamicImage,
         label: Option<&str>,
     ) -> Result<(Self, wgpu::CommandBuffer), failure::Error> {
-        let rgba = img.as_rgba8().unwrap();
+        let rgba = img.to_rgba();
         let dimensions = img.dimensions();
 
         let size = wgpu::Extent3d {
@@ -87,7 +88,11 @@ impl Texture {
 
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-    pub fn create_depth_texture(device: &wgpu::Device, sc_desc: &wgpu::SwapChainDescriptor, label: &str) -> Self {
+    pub fn create_depth_texture(
+        device: &wgpu::Device,
+        sc_desc: &wgpu::SwapChainDescriptor,
+        label: &str,
+    ) -> Self {
         let size = wgpu::Extent3d {
             width: sc_desc.width,
             height: sc_desc.height,
@@ -100,7 +105,9 @@ impl Texture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: Self::DEPTH_FORMAT,
-            usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT | wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_SRC,
+            usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT
+                | wgpu::TextureUsage::SAMPLED
+                | wgpu::TextureUsage::COPY_SRC,
         };
         let texture = device.create_texture(&desc);
         let view = texture.create_default_view();
@@ -113,6 +120,21 @@ impl Texture {
             mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        Self { texture, view, sampler }
+        Self {
+            texture,
+            view,
+            sampler,
+        }
+    }
+
+    pub fn load<P: AsRef<Path>>(
+        device: &wgpu::Device,
+        path: P,
+    ) -> Result<(Self, wgpu::CommandBuffer), failure::Error> {
+        let path_copy = path.as_ref().to_path_buf();
+        let label = path_copy.to_str();
+
+        let img = image::open(path)?;
+        Self::from_image(device, &img, label)
     }
 }
