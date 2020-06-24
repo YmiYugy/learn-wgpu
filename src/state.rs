@@ -21,7 +21,6 @@ pub struct State {
     pub sc_desc: wgpu::SwapChainDescriptor,
 
     pub depth_texture: Texture,
-    pub depth_texture_bind_group: wgpu::BindGroup,
 
     pub vertex_buffer: wgpu::Buffer,
     pub num_vertices: u32,
@@ -54,7 +53,7 @@ impl State {
 
         let (swap_chain, sc_desc) = Self::setup_swapchain(&device, &size, &surface);
 
-        let (depth_texture, depth_texture_bind_group_layout, depth_texture_bind_group) = Self::setup_depth_texture(&device, &sc_desc);
+        let depth_texture = Texture::create_depth_texture(&device, &sc_desc, "depth_texture");
 
         let (vertex_buffer, num_vertices, index_buffer, num_indices) =
             Self::setup_vertex_input(&device);
@@ -72,7 +71,7 @@ impl State {
 
         let default_render_pipeline = Self::setup_default_render_pipeline(
             &device,
-            &[&depth_texture_bind_group_layout, &uniform_bind_group_layout],
+            &[&texture_bind_group_layout, &uniform_bind_group_layout],
             sc_desc.format,
             &vs,
             &fs,
@@ -95,7 +94,6 @@ impl State {
             swap_chain,
             sc_desc,
             depth_texture,
-            depth_texture_bind_group,
             vertex_buffer,
             num_vertices,
             index_buffer,
@@ -186,7 +184,7 @@ impl State {
                 }),
             });
             render_pass.set_pipeline(&self.default_render_pipeline);
-            render_pass.set_bind_group(0, &self.depth_texture_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.texture_bind_group, &[]);
             render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
@@ -330,51 +328,6 @@ impl State {
         (vertex_buffer, num_vertices, index_buffer, num_indices)
     }
 
-    fn setup_depth_texture(
-        device: &wgpu::Device,
-        sc_desc: &wgpu::SwapChainDescriptor,
-    ) -> (Texture, wgpu::BindGroupLayout, wgpu::BindGroup) {
-        let texture = Texture::create_depth_texture(&device, &sc_desc, "depth_texture");
-
-        let depth_texture_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("texture_bind_group_layout"),
-                bindings: &[
-                    wgpu::BindGroupLayoutEntry::new(
-                        0,
-                        wgpu::ShaderStage::FRAGMENT,
-                        wgpu::BindingType::SampledTexture {
-                            dimension: wgpu::TextureViewDimension::D2,
-                            component_type: wgpu::TextureComponentType::Uint,
-                            multisampled: false,
-                        },
-                    ),
-                    wgpu::BindGroupLayoutEntry::new(
-                        1,
-                        wgpu::ShaderStage::FRAGMENT,
-                        wgpu::BindingType::Sampler { comparison: false },
-                    ),
-                ],
-            });
-
-        let depth_texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &depth_texture_bind_group_layout,
-            bindings: &[
-                wgpu::Binding {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture.view),
-                },
-                wgpu::Binding {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
-                },
-            ],
-            label: Some("depth_texture_bind_group"),
-        });
-
-        (texture, depth_texture_bind_group_layout, depth_texture_bind_group)
-    }
-
     fn setup_texture(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -441,7 +394,7 @@ impl State {
         let descriptor = Self::create_render_pipeline_descriptor(
             &layout,
             vs,
-            fs,
+            Some(fs),
             topology,
             &color_states,
             vertex_buffers,
@@ -526,7 +479,7 @@ impl State {
     fn create_render_pipeline_descriptor<'a>(
         pipeline_layout: &'a wgpu::PipelineLayout,
         vs: &'a wgpu::ShaderModule,
-        fs: &'a wgpu::ShaderModule,
+        fs: Option<&'a wgpu::ShaderModule>,
         topology: wgpu::PrimitiveTopology,
         color_states: &'a [wgpu::ColorStateDescriptor],
         vertex_buffers: &'a [wgpu::VertexBufferDescriptor],
@@ -537,10 +490,14 @@ impl State {
                 module: vs,
                 entry_point: "main",
             },
-            fragment_stage: Some(wgpu::ProgrammableStageDescriptor {
-                module: fs,
-                entry_point: "main",
-            }),
+            fragment_stage: if let Some(fs) = fs {
+                Some(wgpu::ProgrammableStageDescriptor {
+                    module: fs,
+                    entry_point: "main",
+                })
+            } else {
+                None
+            },
             rasterization_state: Some(wgpu::RasterizationStateDescriptor {
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: wgpu::CullMode::None,
