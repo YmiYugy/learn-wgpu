@@ -6,8 +6,8 @@ use include_glsl::include_glsl;
 use std::ops::Range;
 
 pub struct PointCloud {
-    vertex_buffer: wgpu::Buffer,
-    num_vertices: u32,
+    pub vertex_buffer: wgpu::Buffer,
+    pub num_vertices: u32,
 }
 
 impl PointCloud {

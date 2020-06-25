@@ -4,6 +4,7 @@ use super::model::*;
 use super::point_cloud::*;
 use super::texture::*;
 use super::uniforms::*;
+use super::boids::*;
 use winit::{event::*, window::Window};
 
 pub struct State {
@@ -37,10 +38,13 @@ pub struct State {
     pub model_render_pipeline: wgpu::RenderPipeline,
     pub default: bool,
     pub clear_color: wgpu::Color,
+
+    pub boids: Boids,
+    pub boids_render_pipeline: wgpu::RenderPipeline,
 }
 
 impl State {
-    pub async fn new(window: &Window) -> Self {
+    pub async fn new(window: &Window) -> State {
         let (size, surface, adapter) = Self::setup_adapter(window).await;
 
         let (device, queue) = Self::setup_device(&adapter).await;
@@ -82,6 +86,15 @@ impl State {
             a: 1.0,
         };
 
+        let indices = &obj_model.meshes[0].index_buffer;
+        let vertices = &obj_model.meshes[0].vertex_buffer;
+        let num_elements = obj_model.meshes[0].num_elements;
+        let sample_points = &point_cloud.vertex_buffer;
+        let sample_count = point_cloud.num_vertices;
+
+        let boids = Boids::create_boids(&device, 10, indices, vertices, num_elements, sample_points, sample_count);
+        let boids_render_pipeline = Boids::setup_default_render_pipeline(&device, Some(&[&uniform_layout]), Some(sc_desc.format), None);
+
         Self {
             surface,
             adapter,
@@ -104,6 +117,8 @@ impl State {
             clear_color,
             point_cloud,
             point_cloud_pipeline,
+            boids,
+            boids_render_pipeline,
         }
     }
 
@@ -126,6 +141,8 @@ impl State {
         self.camera_controller.update_camera(&mut self.camera);
         self.uniforms.update_view_proj(&self.camera);
 
+        let cmd = self.boids.update(&self.device, 0.01);
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -145,7 +162,7 @@ impl State {
             std::mem::size_of::<Uniforms>() as wgpu::BufferAddress,
         );
 
-        self.queue.submit(Some(encoder.finish()));
+        self.queue.submit(vec![encoder.finish(), cmd]);
     }
 
     pub fn render(&mut self) {
@@ -179,24 +196,26 @@ impl State {
                     stencil_ops: None,
                 }),
             });
-            render_pass.set_pipeline(&self.model_render_pipeline);
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            let mesh = &self.obj_model.meshes[0];
-            let material = &self.obj_model.materials[mesh.material];
-            render_pass.draw_mesh_instanced(
-                mesh,
-                material,
-                0..self.instances.len() as u32,
-                &self.uniform_bind_group,
-            );
+            // render_pass.set_pipeline(&self.model_render_pipeline);
+            // render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            // let mesh = &self.obj_model.meshes[0];
+            // let material = &self.obj_model.materials[mesh.material];
+            // render_pass.draw_mesh_instanced(
+            //     mesh,
+            //     material,
+            //     0..self.instances.len() as u32,
+            //     &self.uniform_bind_group,
+            // );
+            render_pass.set_pipeline(&self.boids_render_pipeline);
+            render_pass.draw_boids_instanced(&self.boids, 0..10, &self.uniform_bind_group);
 
-            render_pass.set_pipeline(&self.point_cloud_pipeline);
-            render_pass.draw_point_cloud_instanced(
-                &self.point_cloud,
-                &self.instance_buffer,
-                0..self.instances.len() as u32,
-                &self.uniform_bind_group,
-            );
+            // render_pass.set_pipeline(&self.point_cloud_pipeline);
+            // render_pass.draw_point_cloud_instanced(
+            //     &self.point_cloud,
+            //     &self.instance_buffer,
+            //     0..self.instances.len() as u32,
+            //     &self.uniform_bind_group,
+            // );
         }
 
         self.queue.submit(Some(encoder.finish()));

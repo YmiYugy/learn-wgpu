@@ -28,7 +28,7 @@ impl Vertex for Boid {
     }
 }
 
-pub struct Boids<'c> {
+pub struct Boids {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
@@ -42,13 +42,9 @@ pub struct Boids<'c> {
     boid_bind_group1: wgpu::BindGroup,
     boid_bind_group2: wgpu::BindGroup,
 
-    scene_indices: &'c wgpu::Buffer,
-    scene_vertices: &'c wgpu::Buffer,
-    scene_index_count: u32,
-    sample_points: &'c wgpu::Buffer,
-    sample_count: u32,
     compute_scene_bind_group: wgpu::BindGroup,
 
+    compute_uniforms: ComputeUniforms,
     compute_uniform_buffer: wgpu::Buffer,
     compute_uniform_bind_group: wgpu::BindGroup,
 
@@ -56,17 +52,17 @@ pub struct Boids<'c> {
     compute_pipeline: wgpu::ComputePipeline,
 }
 
-impl<'c> Boids<'c> {
+impl Boids {
     pub fn create_boids(
-        device: & wgpu::Device,
+        device: &wgpu::Device,
         num_instances: u32,
-        scene_indices: &'c wgpu::Buffer,
-        scene_vertices: &'c wgpu::Buffer,
+        scene_indices: & wgpu::Buffer,
+        scene_vertices: & wgpu::Buffer,
         scene_index_count: u32,
-        sample_points: &'c wgpu::Buffer,
+        sample_points: & wgpu::Buffer,
         sample_count: u32,
     ) -> Self {
-        let (obj_models, _) = tobj::load_obj("/assets/models/", true).unwrap();
+        let (obj_models, _) = tobj::load_obj("assets/models/boid.obj", true).unwrap();
         assert_eq!(obj_models.len(), 1);
         for m in obj_models {
             let mut vertices = Vec::new();
@@ -94,8 +90,18 @@ impl<'c> Boids<'c> {
             let mut rng = rand::thread_rng();
 
             let boids: Vec<_> = std::iter::repeat_with(|| Boid {
-                pos: [(rng.gen::<f32>()-0.5)*5.0, (rng.gen::<f32>()-0.5)*5.0, (rng.gen::<f32>()-0.5)*5.0, 1.0],
-                vel: [(rng.gen::<f32>()-0.5)*5.0, (rng.gen::<f32>()-0.5)*5.0, (rng.gen::<f32>()-0.5)*5.0, 0.0],
+                pos: [
+                    (rng.gen::<f32>() - 0.5) * 5.0,
+                    (rng.gen::<f32>() - 0.5) * 5.0,
+                    (rng.gen::<f32>() - 0.5) * 5.0,
+                    1.0,
+                ],
+                vel: [
+                    (rng.gen::<f32>() - 0.5) * 5.0,
+                    (rng.gen::<f32>() - 0.5) * 5.0,
+                    (rng.gen::<f32>() - 0.5) * 5.0,
+                    0.0,
+                ],
             })
             .take(num_instances as usize)
             .collect();
@@ -195,7 +201,7 @@ impl<'c> Boids<'c> {
                             wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
                                 min_binding_size: None,
-                                readonly: true,
+                                readonly: false,
                             },
                         ),
                         wgpu::BindGroupLayoutEntry::new(
@@ -204,22 +210,22 @@ impl<'c> Boids<'c> {
                             wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
                                 min_binding_size: None,
-                                readonly: true,
+                                readonly: false,
                             },
                         ),
                         wgpu::BindGroupLayoutEntry::new(
-                            1,
+                            3,
                             wgpu::ShaderStage::COMPUTE,
                             wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
                                 min_binding_size: None,
-                                readonly: true,
+                                readonly: false,
                             },
                         ),
                     ],
                 });
             let compute_scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &boid_bind_group_layout,
+                layout: &compute_scene_bind_group_layout,
                 bindings: &[
                     wgpu::Binding {
                         binding: 0,
@@ -242,7 +248,7 @@ impl<'c> Boids<'c> {
             });
 
             let compute_uniforms = ComputeUniforms {
-                triangle_count: scene_index_count,
+                triangle_count: scene_index_count / 3,
                 sample_cout: sample_count,
                 delta: 0.0,
             };
@@ -290,12 +296,8 @@ impl<'c> Boids<'c> {
                 boid_buffer_index: false,
                 boid_bind_group1,
                 boid_bind_group2,
-                scene_indices,
-                scene_vertices,
-                scene_index_count,
-                sample_points,
-                sample_count,
                 compute_scene_bind_group,
+                compute_uniforms,
                 compute_uniform_buffer,
                 compute_uniform_bind_group,
                 compute_shader,
@@ -305,10 +307,41 @@ impl<'c> Boids<'c> {
 
         panic!("no model found")
     }
+
+    pub fn update(& mut self, device: &wgpu::Device, delta: f32) -> wgpu::CommandBuffer {
+        self.compute_uniforms.delta = delta;
+        let staging_buffer = device.create_buffer_with_data(
+            bytemuck::cast_slice(&[self.compute_uniforms]),
+            wgpu::BufferUsage::COPY_SRC,
+        );
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("compute_encoder"),
+        });
+
+        encoder.copy_buffer_to_buffer(
+            &staging_buffer,
+            0,
+            &self.compute_uniform_buffer,
+            0,
+            std::mem::size_of::<ComputeUniforms>() as wgpu::BufferAddress,
+        );
+        {
+            let mut compute_pass = encoder.begin_compute_pass();
+            compute_pass.set_pipeline(&self.compute_pipeline);
+            compute_pass.set_bind_group(0, if self.boid_buffer_index {&self.boid_bind_group2} else {&self.boid_bind_group1}, &[]);
+            self.boid_buffer_index = !self.boid_buffer_index;
+            compute_pass.set_bind_group(1, &self.compute_scene_bind_group, &[]);
+            compute_pass.set_bind_group(2, &self.compute_uniform_bind_group, &[]);
+            compute_pass.dispatch(self.num_instances, 1, 1);
+        }
+
+        encoder.finish()
+    }
 }
 
-impl<'c> Renderable for Boids<'c> {
-    fn setup_shader(device: & wgpu::Device) -> (wgpu::ShaderModule, Option<wgpu::ShaderModule>) {
+impl Renderable for Boids {
+    fn setup_shader(device: &wgpu::Device) -> (wgpu::ShaderModule, Option<wgpu::ShaderModule>) {
         (
             Self::create_shader_module(device, include_glsl!("../shaders/boids.vert")),
             Some(Self::create_shader_module(
@@ -317,17 +350,17 @@ impl<'c> Renderable for Boids<'c> {
             )),
         )
     }
-    fn setup_bind_group_layouts(device: & wgpu::Device) -> Vec<wgpu::BindGroupLayout> {
+    fn setup_bind_group_layouts(device: &wgpu::Device) -> Vec<wgpu::BindGroupLayout> {
         vec![Uniforms::setup_bing_group_layout(device)]
     }
     fn setup_vertex_input<'a>() -> Vec<wgpu::VertexBufferDescriptor<'a>> {
         vec![Point::desc(), InstanceRaw::desc()]
     }
     fn setup_default_render_pipeline(
-        device: & wgpu::Device,
-        layouts: Option<&[& wgpu::BindGroupLayout]>,
+        device: &wgpu::Device,
+        layouts: Option<&[&wgpu::BindGroupLayout]>,
         format: Option<wgpu::TextureFormat>,
-        shaders: Option<(& wgpu::ShaderModule, Option<& wgpu::ShaderModule>)>,
+        shaders: Option<(&wgpu::ShaderModule, Option<&wgpu::ShaderModule>)>,
     ) -> wgpu::RenderPipeline {
         if shaders.is_some() {
             Self::create_render_pipeline(
@@ -360,8 +393,6 @@ impl<'c> Renderable for Boids<'c> {
     }
 }
 
-
-
 pub trait DrawBoids<'a, 'b>
 where
     'b: 'a,
@@ -371,7 +402,7 @@ where
         &mut self,
         boids: &'b Boids,
         instances: Range<u32>,
-        uniforms: &'b wgpu::BindGroup
+        uniforms: &'b wgpu::BindGroup,
     );
 }
 
@@ -386,7 +417,7 @@ where
         &mut self,
         boids: &'b Boids,
         instances: Range<u32>,
-        uniforms: &'b wgpu::BindGroup
+        uniforms: &'b wgpu::BindGroup,
     ) {
         self.set_index_buffer(boids.index_buffer.slice(..));
         self.set_vertex_buffer(0, boids.vertex_buffer.slice(..));
@@ -408,8 +439,8 @@ unsafe impl bytemuck::Pod for ComputeUniforms {}
 unsafe impl bytemuck::Zeroable for ComputeUniforms {}
 
 impl ComputeUniforms {
-    pub fn setup_bing_group_layout(device: & wgpu::Device) -> wgpu::BindGroupLayout {
-        device.create_bind_group_layout(& wgpu::BindGroupLayoutDescriptor {
+    pub fn setup_bing_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("compute_uniform_bind_group_layout"),
             bindings: &[wgpu::BindGroupLayoutEntry::new(
                 0,
@@ -423,9 +454,9 @@ impl ComputeUniforms {
     }
 
     pub fn create_bind_group(
-        device: & wgpu::Device,
-        buffer: & wgpu::Buffer,
-        layout: Option<& wgpu::BindGroupLayout>,
+        device: &wgpu::Device,
+        buffer: &wgpu::Buffer,
+        layout: Option<&wgpu::BindGroupLayout>,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: layout.unwrap_or(&Self::setup_bing_group_layout(device)),

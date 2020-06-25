@@ -17,7 +17,6 @@ use winit::{
 };
 
 fn main() {
-    println!("{}", wgpu::DeviceDescriptor::default().limits.max_bind_groups);
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();

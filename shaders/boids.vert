@@ -10,6 +10,5 @@ uniform Uniforms {
 };
 
 void main() {
-    gl_Position = u_view_proj * (a_model * a_position + vec4(0.0, 3.0, 0.0, 0.0));
-    gl_PointSize = 3.0;
+    gl_Position = u_view_proj * a_model * a_position;
 }

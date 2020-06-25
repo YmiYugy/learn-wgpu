@@ -1,7 +1,7 @@
 #version 450
 
 layout(
-local_size_x = 64,
+local_size_x = 1,
 local_size_y = 1,
 local_size_z = 1
 ) in;
@@ -113,8 +113,8 @@ void main() {
     vec3 pos = boids[gid].pos.xyz;
     vec3 vel = boids[gid].vel.xyz;
 
-    //boids2[gid].vel = boids[gid].vel;
-    //boids2[gid].vel.x = length(vel);
+    boids2[gid].vel = boids[gid].vel;
+    boids2[gid].vel.x = length(vel);
 
     float dist = 0.2;
 
@@ -122,16 +122,17 @@ void main() {
     vec3 xaxis = normalize(cross(up, vel));
     vec3 yaxis = normalize(cross(vel, xaxis));
 
-    mat3 transform;
+    mat4 transform;
     {
         vec3 v = cross(vec3(1.0f, 0.0f, 0.0f), vel.xyz);
         vec3 u = v/length(v);
         float c = dot(vec3(1.0f, 0.0f, 0.0f), vel.xyz);
         float h = (1-c)/(1-c*c);
-        transform = mat3(
-        c+h*v.x*v.x, h*v.x*v.y+v.z, h*v.x*v.z-v.y,
-        h*v.x*v.y-v.z, c+h*v.y*v.y, h*v.y*v.z+v.x,
-        h*v.x*v.z+v.y, h*v.y*v.z-v.x, c+h*v.z*v.z
+        transform = mat4(
+        c+h*v.x*v.x, h*v.x*v.y+v.z, h*v.x*v.z-v.y, 0,
+        h*v.x*v.y-v.z, c+h*v.y*v.y, h*v.y*v.z+v.x, 0,
+        h*v.x*v.z+v.y, h*v.y*v.z-v.x, c+h*v.z*v.z, 0,
+        0, 0, 0, 1
         );
     }
 
@@ -167,7 +168,24 @@ void main() {
             break;
         }
     }
-    pos += delta*vel;
-    boids[gid].pos.xyz = pos;
-    boids[gid].vel.xyz = vel;
+    pos += vel*delta;
+    boids2[gid].pos.xyz = pos;
+    boids2[gid].vel.xyz = vel;
+
+    {
+        vec3 v = cross(vec3(1.0f, 0.0f, 0.0f), vel.xyz);
+        vec3 u = v/length(v);
+        float c = dot(vec3(1.0f, 0.0f, 0.0f), vel.xyz);
+        float h = (1-c)/(1-c*c);
+        transform = mat4(
+            c+h*v.x*v.x, h*v.x*v.y+v.z, h*v.x*v.z-v.y, 0,
+            h*v.x*v.y-v.z, c+h*v.y*v.y, h*v.y*v.z+v.x, 0,
+            h*v.x*v.z+v.y, h*v.y*v.z-v.x, c+h*v.z*v.z, 0,
+            0, 0, 0, 1
+        );
+        instances[gid][0] = transform[0];
+        instances[gid][1] = transform[1];
+        instances[gid][2] = transform[2];
+        instances[gid][3] = transform[3];
+    }
 }

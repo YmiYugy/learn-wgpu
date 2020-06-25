@@ -105,11 +105,11 @@ impl Model {
 
             let vertex_buffer = device.create_buffer_with_data(
                 bytemuck::cast_slice(&vertices),
-                wgpu::BufferUsage::VERTEX,
+                wgpu::BufferUsage::VERTEX | wgpu::BufferUsage::STORAGE,
             );
             let index_buffer = device.create_buffer_with_data(
                 bytemuck::cast_slice(&m.mesh.indices),
-                wgpu::BufferUsage::INDEX,
+                wgpu::BufferUsage::INDEX | wgpu::BufferUsage::STORAGE,
             );
 
             meshes.push(Mesh {
