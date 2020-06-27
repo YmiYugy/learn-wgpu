@@ -92,7 +92,7 @@ impl State {
         let sample_points = &point_cloud.vertex_buffer;
         let sample_count = point_cloud.num_vertices;
 
-        let boids = Boids::create_boids(&device, 10, indices, vertices, num_elements, sample_points, sample_count);
+        let boids = Boids::create_boids(&device, 1024, indices, vertices, num_elements, sample_points, sample_count);
         let boids_render_pipeline = Boids::setup_default_render_pipeline(&device, Some(&[&uniform_layout]), Some(sc_desc.format), None);
 
         Self {

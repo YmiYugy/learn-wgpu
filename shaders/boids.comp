@@ -12,8 +12,9 @@ struct Boid
     vec4 vel;
 };
 
-struct Triangle {
-    uint indices[3];
+struct Evasion {
+    bool will_collide;
+    float dist;
 };
 
 layout(std430, set = 0, binding = 0) buffer BoidsInput
@@ -26,86 +27,131 @@ layout(std430, set = 0, binding = 1) buffer BoidsOutput
     Boid boids2[];
 };
 
-layout(std430, set = 1, binding = 0) buffer Instances
+layout(std430, set = 1, binding = 0) buffer Indices
 {
-    mat4 instances[];
+    uint indices[];
 };
 
-layout(std430, set = 1, binding = 1) buffer Indices
-{
-    Triangle indices[];
-};
-
-layout(std430, set = 1, binding = 2) buffer Vertices
+layout(std430, set = 1, binding = 1) buffer Vertices
 {
     vec4 verticies[];
 };
 
-layout(std430, set = 1, binding = 3) buffer SamplePoints {
+layout(std430, set = 1, binding = 2) buffer SamplePoints {
     vec4 samplePoints[];
 };
 
 layout(std140, set = 2, binding = 0) uniform Globals {
     uint triangle_count;
+    uint boid_count;
     uint sample_count;
     float delta;
 };
 
 #define eps 0.005
 
-bool needs_evasion(Triangle tri, vec3 start, vec3 end) {
-    vec3 v0 = verticies[tri.indices[0]].xyz;
-    vec3 v1 = verticies[tri.indices[1]].xyz;
-    vec3 v2 = verticies[tri.indices[2]].xyz;
+const float max_steer_force = 5;
+const float max_speed = 5.0;
+const float min_speed = 3.0;
+const float view_radius = 2.5;
+const float avoid_radius = 0.4;
+const float align_weight = 4;
+const float cohesion_weight = 3;
+const float seperate_weight = 4;
+const float collisions_avoid_dst = 2.5;
+const float avoid_collision_weight = 10;
+const float collision_avoid_force_dst = 0.1 * 0.1;
+
+Evasion needs_evasion(vec3 v0, vec3 v1, vec3 v2, vec3 start, vec3 end) {
 
     vec3 u = v1 - v0;
     vec3 v = v2 - v0;
-    vec3 n = cross(u, v);// normal vector of the triangle
-
-    // ignore degenereate triangles
-    if (n == vec3(0)) {
-        return false;
-    }
-
     vec3 dir = end - start;// direction of line segment
-    vec3 w0 = start-v0;
-    float a = -dot(n, w0);
+    float n_dir =dot(dir, dir);
+    vec3 n = cross(u, v);
+    float n_n = length(n);
+    if (n_n < eps) {
+        return Evasion(true, n_dir);
+    }
+    n = normalize(n);
+
+
+    float a = dot(n, v0-start);
     float b = dot(n, dir);
 
     if (abs(b) < eps) { // triangle parallel to segment
-        if (a == 0) {
-            return true;// in the same plane better avoid
+        if (abs(a) < eps) {
+            return Evasion(true, 0);// in the same plane better avoid
         } else {
-            return false;// disjoint no need to act
+            return Evasion(false, 0);// disjoint no need to act
         }
     }
 
     float r = a / b;
     if (r < 0.0 || r > 1.0) { // intersection of line with plane outside segment
-        return false;
+        return Evasion(false, 0);
     }
 
     vec3 i = start + r * dir;// intersection point
+    vec3 w = i-v0;
 
-
-    float uu = dot(u, u);
-    float uv = dot(u, v);
-    float vv = dot(v, v);
-    vec3 w = i - v0;
-    float wu = dot(w, u);
-    float wv = dot(w, v);
-    float d = uv * uv - uu * vv;
-
-    float s = (uv * wv - vv * wu) / d;
-    if (s < 0.0 || s > 1.0) {
-        return false;
+    float m1 = dot(u, w)/dot(u, u);
+    float m2 = dot(v, w)/dot(v, v);
+    if (m1 < 0 || m1 > 1 || m2 < 0 || m2 > 1) {
+        return Evasion(false, 0);
+    } else {
+        return Evasion(true, dot(i-start, i-start));
     }
-    float t = (uv * wu - uu * wv) / d;
-    if (t < 0.0 || (s+t) > 1.0) {
-        return false;
-    }
+}
 
-    return true;
+vec3 orthogonal(vec3 v) {
+    float x = abs(v.x);
+    float y = abs(v.y);
+    float z = abs(v.z);
+
+    vec3 other = x < y ? (x < z ? vec3(1, 0, 0) : vec3(0, 0, 1)) : (y < z ? vec3(0, 1, 0) : vec3(0, 0, 1));
+    return cross(v, other);
+}
+
+vec4 get_rotation_between(vec3 u, vec3 v) {
+    vec4 q;
+    vec3 v0 = normalize(u);
+    vec3 v1 = normalize(v);
+
+    float d = dot(v0, v1);
+
+    if (d < (eps - 1.0)) {
+        q = vec4(normalize(orthogonal(u)), 0);
+    } else {
+        float s = sqrt((1+d)*2);
+        float invs = 1/s;
+
+        vec3 c = cross(v0, v1);
+
+        q.x = c.x * invs;
+        q.y = c.y * invs;
+        q.z = c.z * invs;
+        q.w = s * 0.5;
+        q = normalize(q);
+    }
+    return q;
+}
+
+vec3 rotate(vec4 quaternion, vec3 vec) {
+    return vec + 2.0 * cross(quaternion.xyz, cross(quaternion.xyz, vec) + quaternion.w * vec);
+}
+
+vec3 steer_towards(vec3 vec, vec3 vel) {
+    float l = length(vec);
+    if (abs(l) < eps) {
+        return vec3(0);
+    }
+    vec3 v = vec/l * max_speed - vel;
+    l = length(v);
+    if (abs(l) < eps) {
+        return vec3(0);
+    }
+    return clamp(l, 0, max_steer_force) * v/l;
 }
 
 void main() {
@@ -113,79 +159,95 @@ void main() {
     vec3 pos = boids[gid].pos.xyz;
     vec3 vel = boids[gid].vel.xyz;
 
-    boids2[gid].vel = boids[gid].vel;
-    boids2[gid].vel.x = length(vel);
 
-    float dist = 0.2;
 
-    vec3 up = vec3(1.0f, 0.0f, 0.0f);
-    vec3 xaxis = normalize(cross(up, vel));
-    vec3 yaxis = normalize(cross(vel, xaxis));
+    vec3 acceleration = vec3(0);
 
-    mat4 transform;
     {
-        vec3 v = cross(vec3(1.0f, 0.0f, 0.0f), vel.xyz);
-        vec3 u = v/length(v);
-        float c = dot(vec3(1.0f, 0.0f, 0.0f), vel.xyz);
-        float h = (1-c)/(1-c*c);
-        transform = mat4(
-        c+h*v.x*v.x, h*v.x*v.y+v.z, h*v.x*v.z-v.y, 0,
-        h*v.x*v.y-v.z, c+h*v.y*v.y, h*v.y*v.z+v.x, 0,
-        h*v.x*v.z+v.y, h*v.y*v.z-v.x, c+h*v.z*v.z, 0,
-        0, 0, 0, 1
-        );
-    }
+        vec3 center = vec3(0);
+        vec3 alignment = vec3(0);
+        uint mates = 0;
+        vec3 separate = vec3(0);
 
+        for (uint i = 0; i < boid_count; i++) {
+            if (i == gid) continue;
 
-    //    for(uint i = 0; i < sample_count; i++) {
-    //        vec3 start = pos;
-    //        vec3 posSample = normalize(transform * samplePoints[i].xyz);
-    //        vec3 end = start +  dist * posSample;
-    //        bool no_evasion = true;
-    //        for(uint j = 0; j < triangle_count; j++) {
-    //            Triangle tri = indices[j];
-    //            if(needs_evasion(tri, start, end)) {
-    //                //boids2[gid].pos.x += 1;
-    //                no_evasion = false;
-    //                break;
-    //            }
-    //        }
-    //        if(no_evasion) {
-    //            if(abs(dot(normalize(vel), normalize(posSample))-1.0) > 0.05) {
-    //                boids2[gid].pos.x += 1;
-    //            }
-    //            vel = length(vel) * posSample;
-    //            //boids2[gid].pos.xyz = length(vel) * normalize(posSample);
-    //            //boids2[gid].vel.xyz = posSample;
-    //            break;
-    //        }
-    //    }
-    for (uint i = 0; i < triangle_count; i++) {
-        vec3 start = pos;
-        vec3 end = pos + dist * normalize(vel);
-        if (needs_evasion(indices[i], start, end)) {
-            vel *= -1;
-            break;
+            Boid boid = boids[i];
+            vec3 offset = boid.pos.xyz - pos;
+            float dist2 = dot(offset, offset);
+            if (dist2 < view_radius * view_radius) {
+                center += boids[i].pos.xyz;
+                alignment += boid.vel.xyz;
+                mates++;
+            }
+            if (dist2 < avoid_radius * avoid_radius) {
+                separate -= (boid.pos.xyz-pos)/dist2;
+            }
         }
+
+        if (mates > 0) {
+            center /= mates;
+            center -= pos;
+        }
+
+        acceleration += cohesion_weight * steer_towards(center, vel);
+        acceleration += align_weight * steer_towards(alignment, vel);
+        acceleration += seperate_weight * steer_towards(separate, vel);
     }
-    pos += vel*delta;
+    vel += delta * acceleration;
+
+    //    float speed = length(vel);
+    //    vel = clamp(speed, min_speed, max_speed)*vel/speed;
+
+    // vec4 q_rot = get_rotation_between(vec3(1, 0, 0), vel);
+
+    // float dist = collisions_avoid_dst * collisions_avoid_dst;
+    // vec3 vel_n = normalize(vel);
+    // for (uint j = 0; j < triangle_count; j++) {
+    //     vec3 v0 = verticies[indices[3*j + 0]].xyz;
+    //     vec3 v1 = verticies[indices[3*j + 1]].xyz;
+    //     vec3 v2 = verticies[indices[3*j + 2]].xyz;
+    //     Evasion e = needs_evasion(v0, v1, v2, pos, pos + collisions_avoid_dst * vel_n);
+    //     if (e.will_collide) {
+    //         dist = min(dist, e.dist);
+    //     }
+    // }
+
+    // if (abs(dist-collisions_avoid_dst*collisions_avoid_dst) > eps) {
+    //     for (uint i = 1; i < sample_count; i++) {
+    //         vec3 start = pos;
+    //         vec3 sampleDir = normalize(rotate(q_rot, samplePoints[i].xyz));
+    //         vec3 end = pos + collisions_avoid_dst * sampleDir;
+
+    //         bool collide = false;
+
+    //         for (uint j = 0; j < triangle_count; j++) {
+    //             vec3 v0 = verticies[indices[3*j + 0]].xyz;
+    //             vec3 v1 = verticies[indices[3*j + 1]].xyz;
+    //             vec3 v2 = verticies[indices[3*j + 2]].xyz;
+    //             Evasion e = needs_evasion(v0, v1, v2, start, end);
+    //             if (e.will_collide) {
+    //                 collide = true;
+    //                 break;
+    //             }
+    //         }
+    //         if (!collide) {
+    //             if (dist < collision_avoid_force_dst) {
+    //                 vel = length(vel) * sampleDir;
+    //                 break;
+    //             } else {
+    //                 vel += delta * avoid_collision_weight * steer_towards(sampleDir, vel);
+    //                 break;
+    //             }
+    //         }
+    //     }
+    // }
+
+    float speed = length(vel);
+    vel = clamp(speed, min_speed, max_speed)*vel/speed;
+
+    pos += vel * delta;
+
     boids2[gid].pos.xyz = pos;
     boids2[gid].vel.xyz = vel;
-
-    {
-        vec3 v = cross(vec3(1.0f, 0.0f, 0.0f), vel.xyz);
-        vec3 u = v/length(v);
-        float c = dot(vec3(1.0f, 0.0f, 0.0f), vel.xyz);
-        float h = (1-c)/(1-c*c);
-        transform = mat4(
-            c+h*v.x*v.x, h*v.x*v.y+v.z, h*v.x*v.z-v.y, 0,
-            h*v.x*v.y-v.z, c+h*v.y*v.y, h*v.y*v.z+v.x, 0,
-            h*v.x*v.z+v.y, h*v.y*v.z-v.x, c+h*v.z*v.z, 0,
-            0, 0, 0, 1
-        );
-        instances[gid][0] = transform[0];
-        instances[gid][1] = transform[1];
-        instances[gid][2] = transform[2];
-        instances[gid][3] = transform[3];
-    }
 }

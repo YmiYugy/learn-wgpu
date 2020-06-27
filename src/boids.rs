@@ -1,9 +1,7 @@
-use super::instance::*;
 use super::model::Vertex;
 use super::point_cloud::*;
 use super::state::*;
 use super::uniforms::*;
-use cgmath::InnerSpace;
 use include_glsl::include_glsl;
 use rand::Rng;
 use std::ops::Range;
@@ -22,8 +20,8 @@ impl Vertex for Boid {
     fn desc<'a>() -> wgpu::VertexBufferDescriptor<'a> {
         wgpu::VertexBufferDescriptor {
             stride: std::mem::size_of::<Boid>() as wgpu::BufferAddress,
-            step_mode: wgpu::InputStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float4],
+            step_mode: wgpu::InputStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![1 => Float4, 2 => Float4],
         }
     }
 }
@@ -33,7 +31,6 @@ pub struct Boids {
     index_buffer: wgpu::Buffer,
     num_indices: u32,
 
-    instance_buffer: wgpu::Buffer,
     num_instances: u32,
 
     boid_buffer1: wgpu::Buffer,
@@ -106,28 +103,9 @@ impl Boids {
             .take(num_instances as usize)
             .collect();
             let boid_buffer1 = device
-                .create_buffer_with_data(bytemuck::cast_slice(&boids), wgpu::BufferUsage::STORAGE);
+                .create_buffer_with_data(bytemuck::cast_slice(&boids), wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::VERTEX);
             let boid_buffer2 = device
-                .create_buffer_with_data(bytemuck::cast_slice(&boids), wgpu::BufferUsage::STORAGE);
-
-            let instances: Vec<InstanceRaw> = boids
-                .iter()
-                .map(|boid| {
-                    Instance {
-                        position: cgmath::vec3(boid.pos[0], boid.pos[1], boid.pos[2]),
-                        rotation: cgmath::Quaternion::from_arc(
-                            cgmath::Vector3::unit_x(),
-                            cgmath::vec3(boid.vel[0], boid.vel[1], boid.vel[2]).normalize(),
-                            None,
-                        ),
-                    }
-                    .to_raw()
-                })
-                .collect();
-            let instance_buffer = device.create_buffer_with_data(
-                bytemuck::cast_slice(&instances),
-                wgpu::BufferUsage::VERTEX | wgpu::BufferUsage::STORAGE,
-            );
+                .create_buffer_with_data(bytemuck::cast_slice(&boids), wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::VERTEX);
 
             let boid_bind_group_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -213,15 +191,6 @@ impl Boids {
                                 readonly: false,
                             },
                         ),
-                        wgpu::BindGroupLayoutEntry::new(
-                            3,
-                            wgpu::ShaderStage::COMPUTE,
-                            wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                min_binding_size: None,
-                                readonly: false,
-                            },
-                        ),
                     ],
                 });
             let compute_scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -229,18 +198,14 @@ impl Boids {
                 bindings: &[
                     wgpu::Binding {
                         binding: 0,
-                        resource: wgpu::BindingResource::Buffer(instance_buffer.slice(..)),
-                    },
-                    wgpu::Binding {
-                        binding: 1,
                         resource: wgpu::BindingResource::Buffer(scene_indices.slice(..)),
                     },
                     wgpu::Binding {
-                        binding: 2,
+                        binding: 1,
                         resource: wgpu::BindingResource::Buffer(scene_vertices.slice(..)),
                     },
                     wgpu::Binding {
-                        binding: 3,
+                        binding: 2,
                         resource: wgpu::BindingResource::Buffer(sample_points.slice(..)),
                     },
                 ],
@@ -249,6 +214,7 @@ impl Boids {
 
             let compute_uniforms = ComputeUniforms {
                 triangle_count: scene_index_count / 3,
+                boid_count: num_instances,
                 sample_cout: sample_count,
                 delta: 0.0,
             };
@@ -289,7 +255,6 @@ impl Boids {
                 vertex_buffer,
                 index_buffer,
                 num_indices,
-                instance_buffer,
                 num_instances,
                 boid_buffer1,
                 boid_buffer2,
@@ -354,7 +319,7 @@ impl Renderable for Boids {
         vec![Uniforms::setup_bing_group_layout(device)]
     }
     fn setup_vertex_input<'a>() -> Vec<wgpu::VertexBufferDescriptor<'a>> {
-        vec![Point::desc(), InstanceRaw::desc()]
+        vec![Point::desc(), Boid::desc()]
     }
     fn setup_default_render_pipeline(
         device: &wgpu::Device,
@@ -421,7 +386,7 @@ where
     ) {
         self.set_index_buffer(boids.index_buffer.slice(..));
         self.set_vertex_buffer(0, boids.vertex_buffer.slice(..));
-        self.set_vertex_buffer(1, boids.instance_buffer.slice(..));
+        self.set_vertex_buffer(1, if boids.boid_buffer_index {boids.boid_buffer1.slice(..)} else {boids.boid_buffer2.slice(..)});
         self.set_bind_group(0, &uniforms, &[]);
         self.draw_indexed(0..boids.num_indices, 0, instances);
     }
@@ -431,6 +396,7 @@ where
 #[derive(Debug, Copy, Clone)]
 pub struct ComputeUniforms {
     triangle_count: u32,
+    boid_count: u32,
     sample_cout: u32,
     delta: f32,
 }
